@@ -1,0 +1,9 @@
+@import "tailwindcss";
+@source "../../../packages/ui";
+
+@theme {
+  --color-brand-beige: #f5eedd;
+  --color-brand-mint: #7ae2cf;
+  --color-brand-teal: #077a7d;
+  --color-brand-dark: #06202b;
+}

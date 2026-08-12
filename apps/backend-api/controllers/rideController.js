@@ -1,0 +1,553 @@
+const Ride = require("../models/Ride");
+const Driver = require("../models/Driver");
+const { calculateDistance } = require("../utils/fareCalculator");
+
+const redisClient = require("../config/redis");
+
+const bookRide = async (req, res) => {
+  try {
+    // Extract the exact fields your Ride schema expects from the request body
+    const { pickupLocation, dropoffLocation, vehicleType } = req.body;
+
+    // Calculate the fare using the utility
+    const distance = calculateDistance(
+      pickupLocation.lat,
+      pickupLocation.lng,
+      dropoffLocation.lat,
+      dropoffLocation.lng,
+    );
+
+    const baseFare = 50;
+    const rates = {
+      "Ride Standard": 12,
+      "Ride Premium": 22,
+      "Ride XL": 30,
+    };
+
+    const perKmRate = rates[vehicleType] || rates["Ride Standard"];
+
+    const calculatedFare = Number((baseFare + distance * perKmRate).toFixed(2));
+    // Create the ride document in the database
+    // Note: req.user._id is provided by your auth middleware
+    const newRide = await Ride.create({
+      rider: req.user._id,
+      pickupLocation,
+      dropoffLocation,
+      vehicleType,
+      fare: calculatedFare,
+      status: "requested", // Matches the default in your schema
+    });
+
+    await newRide.populate("rider", "name phone rating");
+    //Clear the rider's history and the admin's master list
+    await redisClient.del(`rider_history:${req.user._id}`);
+    await redisClient.del("admin:all_rides");
+
+    // Grab the io instance from the app
+    const io = req.app.get("io");
+
+    // Broadcast the new ride to everyone (Drivers will listen for this)
+    io.emit("newRideRequest", newRide);
+
+    res.status(201).json({
+      success: true,
+      data: newRide,
+    });
+  } catch (error) {
+    console.error(`❌ Book Ride Error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+const cancelRideByRider = async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const ride = await Ride.findById(rideId);
+
+    if (!ride) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Ride not found" });
+    }
+
+    // Safety Check: Ensure rider ID is evaluated correctly whether populated or raw ObjectId
+    const riderId = ride.rider._id
+      ? ride.rider._id.toString()
+      : ride.rider.toString();
+
+    // Security Check: Only the rider who booked it can cancel it
+    if (riderId !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to cancel this ride",
+      });
+    }
+
+    if (ride.status === "completed" || ride.status === "cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot cancel a ride that is already ${ride.status}`,
+      });
+    }
+
+    // Free up the driver if one was assigned
+    if (ride.driver) {
+      const driverId = ride.driver._id
+        ? ride.driver._id.toString()
+        : ride.driver.toString();
+      await Driver.findByIdAndUpdate(driverId, { isAvailable: true });
+
+      // Try clearing driver history cache safely
+      try {
+        if (typeof redisClient !== "undefined" && redisClient) {
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+      } catch (redisErr) {
+        console.warn(
+          "⚠️ Redis driver history delete warning:",
+          redisErr.message,
+        );
+      }
+    }
+
+    //  SAVE TO MONGODB
+    ride.status = "cancelled";
+    const updatedRide = await ride.save();
+
+    // Clear Redis caches safely without interrupting the response if Redis fails
+    try {
+      if (typeof redisClient !== "undefined" && redisClient) {
+        await redisClient.del(`rider_history:${riderId}`);
+        await redisClient.del("admin:all_rides");
+      }
+    } catch (redisErr) {
+      console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
+    }
+
+    // Socket Emits: Tell both rooms the RIDER cancelled
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user_${riderId}`).emit("rideCancelled", {
+        rideId,
+        cancelledBy: "rider",
+      });
+
+      if (ride.driver) {
+        const driverId = ride.driver._id
+          ? ride.driver._id.toString()
+          : ride.driver.toString();
+        io.to(`driver_${driverId}`).emit("rideCancelled", {
+          rideId,
+          cancelledBy: "rider",
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Ride cancelled successfully by rider.",
+      data: updatedRide,
+    });
+  } catch (error) {
+    console.error(`❌ Rider Cancel Error:`, error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+const cancelRideByDriver = async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const ride = await Ride.findById(rideId);
+
+    if (!ride) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Ride not found" });
+    }
+    const driverId = req.driver._id.toString();
+
+    // Security Check: Only the assigned driver can cancel it
+    if (!ride.driver || ride.driver.toString() !== driverId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not the assigned driver for this ride",
+      });
+    }
+
+    if (ride.status === "completed" || ride.status === "cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot cancel a ride that is already ${ride.status}`,
+      });
+    }
+
+    // Free up the driver
+    await Driver.findByIdAndUpdate(req.driver._id, { isAvailable: true });
+    await redisClient.del(`driver_history:${req.driver._id}`);
+
+    ride.status = "cancelled";
+    await ride.save();
+
+    // Clear Redis caches
+    await redisClient.del(`rider_history:${ride.rider}`);
+    await redisClient.del("admin:all_rides");
+
+    // Socket Emits: Tell both rooms the DRIVER cancelled
+    const io = req.app.get("io");
+    if (io) {
+      const riderRoomId = ride.rider._id
+        ? ride.rider._id.toString()
+        : ride.rider.toString();
+      const driverRoomId = ride.driver._id
+        ? ride.driver._id.toString()
+        : ride.driver.toString();
+
+      io.to(`user_${riderRoomId}`).emit("rideCancelled", {
+        rideId,
+        cancelledBy: "driver",
+      });
+
+      io.to(`driver_${driverRoomId}`).emit("rideCancelled", {
+        rideId,
+        cancelledBy: "driver",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Ride cancelled successfully by driver.",
+      data: ride,
+    });
+  } catch (error) {
+    console.error(`❌ Driver Cancel Error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+const acceptRide = async (req, res) => {
+  try {
+    const driver = await Driver.findById(req.driver._id);
+
+    if (driver.status !== "active") {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been suspended. You cannot accept rides.",
+      });
+    }
+
+    const ride = await Ride.findById(req.params.id);
+
+    if (!ride) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Ride not found" });
+    }
+
+    // Ensure the ride hasn't already been scooped up by someone else
+    if (ride.status !== "requested") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Ride is no longer available" });
+    }
+
+    ride.driver = req.driver._id;
+    ride.status = "accepted";
+
+    await ride.save();
+
+    const populatedRide = await Ride.findById(ride._id)
+      .populate("rider", "name phone rating")
+      .populate("driver", "name phone rating vehicle");
+
+    //clear rider, driver, and admin lists
+    await redisClient.del(`rider_history:${ride.rider}`);
+    await redisClient.del(`driver_history:${req.driver._id}`);
+    await redisClient.del("admin_all_rides");
+    await redisClient.del("admin:rides:driver:all:rider:all");
+    // Grab the io instance from the app
+    const io = req.app.get("io");
+
+    const riderRoom = `user_${ride.rider._id || ride.rider.toString()}`;
+    console.log("📡 Emitting rideAccepted to room:", riderRoom);
+    io.to(riderRoom).emit("rideAccepted", populatedRide);
+
+    res.status(200).json({
+      success: true,
+      data: populatedRide,
+    });
+  } catch (error) {
+    console.error(`❌ Accept Ride Error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+const startRide = async (req, res) => {
+  try {
+    const { id } = req.params; // Ensure this matches your route parameter (e.g., /:id/start)
+    const ride = await Ride.findById(id);
+
+    if (!ride) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Ride not found" });
+    }
+
+    // Security Check: Only the assigned driver can start the ride
+    const driverId = req.driver._id
+      ? req.driver._id.toString()
+      : req.driver.toString();
+    const assignedDriverId = ride.driver ? ride.driver.toString() : null;
+
+    if (assignedDriverId !== driverId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to start this ride",
+      });
+    }
+
+    // State Check: Only 'accepted' rides can transition to 'in_progress'
+    if (ride.status !== "accepted") {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot start a ride that is currently ${ride.status}`,
+      });
+    }
+
+    //  UPDATE MONGODB
+    ride.status = "in_progress";
+    await ride.save();
+
+    // Re-populate the data so the frontend has fresh info for the In-Progress screens
+    const populatedRide = await Ride.findById(ride._id)
+      .populate("rider", "name phone rating")
+      .populate("driver", "name phone rating vehicle");
+
+    //  CLEAR REDIS CACHES
+    try {
+      if (typeof redisClient !== "undefined" && redisClient) {
+        await redisClient.del(`rider_history:${ride.rider}`);
+        await redisClient.del(`driver_history:${driverId}`);
+        await redisClient.del("admin:all_rides");
+      }
+    } catch (redisErr) {
+      console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
+    }
+
+    //  SOCKET.IO EMIT TO RIDER
+    const io = req.app.get("io");
+    if (io) {
+      const riderRoomId = ride.rider._id
+        ? ride.rider._id.toString()
+        : ride.rider.toString();
+
+      console.log(`📡 Emitting rideStarted to room: user_${riderRoomId}`);
+      io.to(`user_${riderRoomId}`).emit("rideStarted", { ride: populatedRide });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Ride started successfully",
+      data: populatedRide,
+    });
+  } catch (error) {
+    console.error(`❌ Start Ride Error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+const completeRide = async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.id);
+
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found" });
+    }
+
+    // Security check: Ensure the driver completing the ride is the one assigned to it
+    if (ride.driver.toString() !== req.driver.id) {
+      return res
+        .status(401)
+        .json({ message: "Not authorized to complete this ride" });
+    }
+
+    // Update the ride status
+    ride.status = "completed";
+    await ride.save();
+
+    // Make the driver available for new rides again
+    await Driver.findByIdAndUpdate(req.driver.id, { isAvailable: true });
+
+    // Clear rider, driver, and admin lists
+    await redisClient.del(`driver_earnings:${req.driver._id}`);
+    await redisClient.del(`rider_history:${ride.rider}`);
+    await redisClient.del(`driver_history:${req.driver._id}`);
+    await redisClient.del("admin_all_rides");
+
+    // THE MISSING PIECE: EMIT TO THE RIDER
+    // Retrieve your Socket.io instance. (If you export it from another file, import it here instead)
+    const io = req.app.get("io");
+
+    // Emit the event to the Rider's room.
+    // Note: If you used a prefix like `user_${ride.rider}` for the room name in your socket setup, use that here!
+    io.to(`user_${ride.rider.toString()}`).emit("rideCompleted", ride);
+
+    res.status(200).json({
+      message: "Ride completed successfully",
+      ride,
+    });
+  } catch (error) {
+    console.error("❌ Complete Ride Error:", error.message);
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
+};
+
+const getRiderHistory = async (req, res) => {
+  try {
+    const cacheKey = `rider_history:${req.user._id}`;
+
+    const cachedHistory = await redisClient.get(cacheKey);
+    if (cachedHistory) {
+      console.log("⚡ Serving Rider History from Redis");
+      return res.status(200).json(JSON.parse(cachedHistory));
+    }
+
+    console.log("🗄️ Serving Rider History from MongoDB");
+    // Find rides where the rider matches the logged-in user
+    // Sort by most recent first (createdAt: -1)
+    // Populate the driver's name and vehicle info so the rider can see who drove them
+    const rides = await Ride.find({ rider: req.user._id })
+      .sort({ createdAt: -1 })
+      .populate("driver", "name vehicle");
+
+    const responseData = { success: true, count: rides.length, data: rides };
+
+    // Save to Redis for 1 hour (3600 seconds)
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(responseData));
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    console.error(`❌ Get Rider History Error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+const getDriverHistory = async (req, res) => {
+  try {
+    const cacheKey = `driver_history:${req.driver._id}`;
+
+    const cachedHistory = await redisClient.get(cacheKey);
+    if (cachedHistory) {
+      console.log("⚡ Serving Driver History from Redis");
+      return res.status(200).json(JSON.parse(cachedHistory));
+    }
+
+    console.log("🗄️ Serving Driver History from MongoDB");
+
+    const rides = await Ride.find({ driver: req.driver._id })
+      .sort({ createdAt: -1 })
+      .populate("rider", "name");
+
+    const responseData = { success: true, count: rides.length, data: rides };
+
+    await redisClient.setEx(cacheKey, 3600, JSON.stringify(responseData));
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    console.error(`❌ Get Driver History Error: ${error.message}`);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+const getCurrentUserRide = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const cacheKey = `user_active_ride:${userId}`;
+
+    // Check Redis Cache First
+    const cachedRide = await redisClient.get(cacheKey);
+    if (cachedRide) {
+      return res.status(200).json(JSON.parse(cachedRide));
+    }
+
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+
+    // Fetch from Database if not cached
+    const activeRide = await Ride.findOne({
+      rider: userId,
+      status: { $in: ["requested", "accepted", "in_progress"] },
+      createdAt: { $gte: twelveHoursAgo },
+    })
+      .sort({ createdAt: -1 }) // FIX: Always get the newest ride first
+      .populate("rider");
+
+    const responseData = { ride: activeRide || null };
+
+    //  ULTRA SHORT CACHE (15 Seconds)
+    // Active rides change state fast. A short cache debounces the DB
+    // without trapping the rider in a stale UI state.
+    await redisClient.setEx(cacheKey, 15, JSON.stringify(responseData));
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    console.error("Error fetching current user ride:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+const getCurrentDriverRide = async (req, res) => {
+  try {
+    const driverId = req.driver._id;
+    const cacheKey = `driver_active_ride:${driverId}`;
+
+    // Check Redis Cache First
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(JSON.parse(cachedData));
+    }
+
+    //  Fetch the driver from the DB to get their status
+    const Driver = require("../models/Driver");
+    const driverProfile = await Driver.findById(driverId);
+
+    if (!driverProfile) {
+      return res.status(404).json({ error: "Driver not found" });
+    }
+
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+
+    // Fetch the active ride
+    const activeRide = await Ride.findOne({
+      driver: driverId,
+      status: { $in: ["requested", "accepted", "in_progress"] },
+      createdAt: { $gte: twelveHoursAgo },
+    })
+      .sort({ createdAt: -1 })
+      .populate("driver");
+
+    const responseData = {
+      ride: activeRide || null,
+      dutyStatus: driverProfile.dutyStatus,
+    };
+
+    //  ULTRA SHORT CACHE (15 Seconds)
+    // Active rides and duty statuses change fast. This debounces the DB
+    // without trapping the driver in a stale UI state.
+    await redisClient.setEx(cacheKey, 15, JSON.stringify(responseData));
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    console.error("Error fetching current driver ride:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+module.exports = {
+  bookRide,
+  cancelRideByRider,
+  cancelRideByDriver,
+  acceptRide,
+  startRide,
+  completeRide,
+  getRiderHistory,
+  getDriverHistory,
+  getCurrentUserRide,
+  getCurrentDriverRide,
+};

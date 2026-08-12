@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- App Icon Rounded Background (Brand Dark) -->
+  <rect width="200" height="200" rx="45" fill="#06202b" />
+  
+  <!-- Main Safar 'S' / Route (Brand Teal) -->
+  <path d="M 130 70 C 130 40, 70 40, 70 70 C 70 100, 130 100, 130 130 C 130 160, 70 160, 70 130" 
+        fill="none" 
+        stroke="#077a7d" 
+        stroke-width="24" 
+        stroke-linecap="round" />
+        
+  <!-- Journey Highlight (Brand Mint) -->
+  <path d="M 130 70 C 130 40, 70 40, 70 70" 
+        fill="none" 
+        stroke="#7ae2cf" 
+        stroke-width="24" 
+        stroke-linecap="round" />
+        
+  <!-- Point A (Brand Beige) -->
+  <circle cx="130" cy="70" r="12" fill="#f5eedd" />
+  
+  <!-- Point B (Brand Beige) -->
+  <circle cx="70" cy="130" r="12" fill="#f5eedd" />
+</svg>

@@ -1,0 +1,10 @@
+{
+  "name": "ride-hail-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module"
+}
