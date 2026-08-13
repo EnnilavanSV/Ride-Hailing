@@ -40,8 +40,31 @@ const bookRide = async (req, res) => {
 
     await newRide.populate("rider", "name phone rating");
     //Clear the rider's history and the admin's master list
-    await redisClient.del(`rider_history:${req.user._id}`);
-    await redisClient.del("admin:all_rides");
+    try {
+      if (typeof redisClient !== "undefined" && redisClient) {
+        //  Clear the exact key the Admin uses for the full list
+        await redisClient.del("admin:rides:driver:all:rider:all");
+
+        //  Clear the specific rider's history (from book/cancel)
+        const riderId = req.user
+          ? req.user._id.toString()
+          : ride.rider.toString();
+        await redisClient.del(`rider_history:${riderId}`);
+
+        //  Clear the specific driver's history (if applicable)
+        if (ride && ride.driver) {
+          const driverId = ride.driver._id
+            ? ride.driver._id.toString()
+            : ride.driver.toString();
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+
+        //  Force the dashboard counters to update too!
+        await redisClient.del("admin:action_queue_stats");
+      }
+    } catch (redisErr) {
+      console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
+    }
 
     // Grab the io instance from the app
     const io = req.app.get("io");
@@ -116,8 +139,25 @@ const cancelRideByRider = async (req, res) => {
     // Clear Redis caches safely without interrupting the response if Redis fails
     try {
       if (typeof redisClient !== "undefined" && redisClient) {
+        //  Clear the exact key the Admin uses for the full list
+        await redisClient.del("admin:rides:driver:all:rider:all");
+
+        //  Clear the specific rider's history (from book/cancel)
+        const riderId = req.user
+          ? req.user._id.toString()
+          : ride.rider.toString();
         await redisClient.del(`rider_history:${riderId}`);
-        await redisClient.del("admin:all_rides");
+
+        //  Clear the specific driver's history (if applicable)
+        if (ride && ride.driver) {
+          const driverId = ride.driver._id
+            ? ride.driver._id.toString()
+            : ride.driver.toString();
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+
+        //  Force the dashboard counters to update too!
+        await redisClient.del("admin:action_queue_stats");
       }
     } catch (redisErr) {
       console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
@@ -181,14 +221,36 @@ const cancelRideByDriver = async (req, res) => {
 
     // Free up the driver
     await Driver.findByIdAndUpdate(req.driver._id, { isAvailable: true });
-    await redisClient.del(`driver_history:${req.driver._id}`);
 
     ride.status = "cancelled";
     await ride.save();
 
     // Clear Redis caches
-    await redisClient.del(`rider_history:${ride.rider}`);
-    await redisClient.del("admin:all_rides");
+    try {
+      if (typeof redisClient !== "undefined" && redisClient) {
+        //  Clear the exact key the Admin uses for the full list
+        await redisClient.del("admin:rides:driver:all:rider:all");
+
+        //  Clear the specific rider's history (from book/cancel)
+        const riderId = req.user
+          ? req.user._id.toString()
+          : ride.rider.toString();
+        await redisClient.del(`rider_history:${riderId}`);
+
+        //  Clear the specific driver's history (if applicable)
+        if (ride && ride.driver) {
+          const driverId = ride.driver._id
+            ? ride.driver._id.toString()
+            : ride.driver.toString();
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+
+        //  Force the dashboard counters to update too!
+        await redisClient.del("admin:action_queue_stats");
+      }
+    } catch (redisErr) {
+      console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
+    }
 
     // Socket Emits: Tell both rooms the DRIVER cancelled
     const io = req.app.get("io");
@@ -258,10 +320,31 @@ const acceptRide = async (req, res) => {
       .populate("driver", "name phone rating vehicle");
 
     //clear rider, driver, and admin lists
-    await redisClient.del(`rider_history:${ride.rider}`);
-    await redisClient.del(`driver_history:${req.driver._id}`);
-    await redisClient.del("admin_all_rides");
-    await redisClient.del("admin:rides:driver:all:rider:all");
+    try {
+      if (typeof redisClient !== "undefined" && redisClient) {
+        //  Clear the exact key the Admin uses for the full list
+        await redisClient.del("admin:rides:driver:all:rider:all");
+
+        //  Clear the specific rider's history (from book/cancel)
+        const riderId = req.user
+          ? req.user._id.toString()
+          : ride.rider.toString();
+        await redisClient.del(`rider_history:${riderId}`);
+
+        //  Clear the specific driver's history (if applicable)
+        if (ride && ride.driver) {
+          const driverId = ride.driver._id
+            ? ride.driver._id.toString()
+            : ride.driver.toString();
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+
+        //  Force the dashboard counters to update too!
+        await redisClient.del("admin:action_queue_stats");
+      }
+    } catch (redisErr) {
+      console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
+    }
     // Grab the io instance from the app
     const io = req.app.get("io");
 
@@ -323,9 +406,25 @@ const startRide = async (req, res) => {
     //  CLEAR REDIS CACHES
     try {
       if (typeof redisClient !== "undefined" && redisClient) {
-        await redisClient.del(`rider_history:${ride.rider}`);
-        await redisClient.del(`driver_history:${driverId}`);
-        await redisClient.del("admin:all_rides");
+        //  Clear the exact key the Admin uses for the full list
+        await redisClient.del("admin:rides:driver:all:rider:all");
+
+        //  Clear the specific rider's history (from book/cancel)
+        const riderId = req.user
+          ? req.user._id.toString()
+          : ride.rider.toString();
+        await redisClient.del(`rider_history:${riderId}`);
+
+        //  Clear the specific driver's history (if applicable)
+        if (ride && ride.driver) {
+          const driverId = ride.driver._id
+            ? ride.driver._id.toString()
+            : ride.driver.toString();
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+
+        //  Force the dashboard counters to update too!
+        await redisClient.del("admin:action_queue_stats");
       }
     } catch (redisErr) {
       console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
@@ -376,10 +475,33 @@ const completeRide = async (req, res) => {
     await Driver.findByIdAndUpdate(req.driver.id, { isAvailable: true });
 
     // Clear rider, driver, and admin lists
-    await redisClient.del(`driver_earnings:${req.driver._id}`);
-    await redisClient.del(`rider_history:${ride.rider}`);
-    await redisClient.del(`driver_history:${req.driver._id}`);
-    await redisClient.del("admin_all_rides");
+
+    try {
+      if (typeof redisClient !== "undefined" && redisClient) {
+        //  Clear the exact key the Admin uses for the full list
+        await redisClient.del("admin:rides:driver:all:rider:all");
+
+        //  Clear the specific rider's history (from book/cancel)
+        const riderId = req.user
+          ? req.user._id.toString()
+          : ride.rider.toString();
+        await redisClient.del(`rider_history:${riderId}`);
+
+        //  Clear the specific driver's history (if applicable)
+        if (ride && ride.driver) {
+          const driverId = ride.driver._id
+            ? ride.driver._id.toString()
+            : ride.driver.toString();
+          await redisClient.del(`driver_history:${driverId}`);
+        }
+
+        //  Force the dashboard counters to update too!
+        await redisClient.del("admin:action_queue_stats");
+        await redisClient.del(`driver_earnings:${req.driver._id}`);
+      }
+    } catch (redisErr) {
+      console.warn("⚠️ Redis cache clearing warning:", redisErr.message);
+    }
 
     // THE MISSING PIECE: EMIT TO THE RIDER
     // Retrieve your Socket.io instance. (If you export it from another file, import it here instead)
