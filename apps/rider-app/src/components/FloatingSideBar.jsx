@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 
-const FloatingSidebar = ({ isOpen, onClose }) => {
+const FloatingSideBar = ({ isOpen, onClose }) => {
   const location = useLocation();
 
   const navLinks = [
@@ -80,4 +80,4 @@ const FloatingSidebar = ({ isOpen, onClose }) => {
   );
 };
 
-export default FloatingSidebar;
+export default FloatingSideBar;

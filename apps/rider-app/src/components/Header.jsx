@@ -1,7 +1,7 @@
 import React, { useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import FloatingSidebar from "./FloatingSidebar";
+import FloatingSidebar from "./FloatingSideBar";
 
 const Header = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
