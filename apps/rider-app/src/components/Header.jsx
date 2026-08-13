@@ -1,7 +1,7 @@
 import React, { useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import FloatingSidebar from "./FloatingSideBar";
+import FloatingSideBar from "./FloatingSideBar";
 
 const Header = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -85,7 +85,7 @@ const Header = () => {
           </button>
         </div>
       </header>
-      <FloatingSidebar
+      <FloatingSideBar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
       />
