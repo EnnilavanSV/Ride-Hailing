@@ -244,6 +244,8 @@ const createDispute = async (req, res) => {
       description,
     });
 
+    await redisClient.del("admin:all_disputes");
+
     res.status(201).json({
       success: true,
       message:

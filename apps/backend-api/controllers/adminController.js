@@ -176,6 +176,8 @@ const resolveDispute = async (req, res) => {
 
     await dispute.save();
 
+    await redisClient.del("admin:all_disputes");
+
     res.status(200).json({
       success: true,
       message: "Dispute marked as resolved",
