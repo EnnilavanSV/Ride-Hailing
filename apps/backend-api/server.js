@@ -16,7 +16,19 @@ const {
 } = require("./middleware/rateLimiter");
 
 app.use(morgan("dev"));
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "https://ride-hailing-rider-app-liard.vercel.app",
+      "https://ride-hailing-driver-app-rho.vercel.app",
+      "https://ride-hailing-admin-app.vercel.app",
+    ],
+    credentials: true,
+  }),
+);
 app.use(express.json());
 connectDB();
 require("./config/redis");
@@ -58,6 +70,9 @@ const io = new Server(server, {
       "http://localhost:5173",
       "http://localhost:5174",
       "http://localhost:5175",
+      "https://ride-hailing-driver-app-rho.vercel.app",
+      "https://ride-hailing-rider-app-liard.vercel.app",
+      "https://ride-hailing-admin-app.vercel.app",
     ],
     methods: ["GET", "POST", "PUT"],
     credentials: true,
