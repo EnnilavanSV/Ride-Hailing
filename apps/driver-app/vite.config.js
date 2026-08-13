@@ -9,15 +9,11 @@ export default defineConfig({
     // This forces Vite to always resolve these packages to the same instance
     dedupe: ["react", "react-dom"],
   },
+  esbuild: {
+    drop: ["console", "debugger"],
+  },
   build: {
-    minify: "esbuild",
-    // strips out all console.logs and debuggers in production!
+    minify: "esbuild", // (Optional, as this is the default)
     target: "esnext",
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      },
-    },
   },
 });

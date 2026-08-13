@@ -8,15 +8,11 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"],
   },
+  esbuild: {
+    drop: ["console", "debugger"],
+  },
   build: {
     minify: "esbuild",
-    // strips out all console.logs and debuggers in production!
     target: "esnext",
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      },
-    },
   },
 });
