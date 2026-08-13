@@ -11,7 +11,7 @@ import AppLayout from "./layout/AppLayout";
 // --- Auth Screens ---
 import Login from "./screens/Login";
 import Register from "./screens/Register";
-import VehicleSetup from "./screens/VehicleSetup";
+import VehicleSetup from "./screens/vehicleSetup";
 import PendingApproval from "./screens/PendingApproval";
 import DriverFlow from "./screens/DriverFlow";
 import Earnings from "./screens/Earnings";
