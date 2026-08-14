@@ -57,8 +57,8 @@ const LiveMap = () => {
 
   useEffect(() => {
     fetchLiveDrivers();
-    // Set up an interval to refresh driver locations every 10 seconds automatically
-    const interval = setInterval(fetchLiveDrivers, 10000);
+    // Set up an interval to refresh driver locations every 60 seconds automatically
+    const interval = setInterval(fetchLiveDrivers, 6000);
     return () => clearInterval(interval);
   }, [token]);
 
