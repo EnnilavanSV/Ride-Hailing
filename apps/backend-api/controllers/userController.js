@@ -1,5 +1,4 @@
 const User = require("../models/User");
-const Dispute = require("../models/Dispute");
 const jwt = require("jsonwebtoken");
 
 const redisClient = require("../config/redis");
@@ -109,11 +108,8 @@ const getUserProfile = async (req, res) => {
   }
 };
 
-// userController.js
-// Inside userController.js
 const updateUserProfile = async (req, res) => {
   try {
-    //
     const userId = req.user._id || req.user.id;
 
     const user = await User.findById(userId);
@@ -141,7 +137,6 @@ const updateUserProfile = async (req, res) => {
       res.status(404).json({ success: false, message: "User not found" });
     }
   } catch (error) {
-    //
     console.error("❌ Profile Update Error:", error);
     res.status(500).json({
       success: false,
@@ -210,54 +205,6 @@ const deleteAddress = async (req, res) => {
   }
 };
 
-const createDispute = async (req, res) => {
-  try {
-    const { rideId, reason, description } = req.body;
-
-    if (!rideId || !reason || !description) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Please provide a Ride ID, select a reason, and describe the issue.",
-      });
-    }
-
-    // Dynamically determine who is raising the dispute based on the auth middleware
-    let raisedBy;
-    let raisedByModel;
-
-    if (req.user) {
-      raisedBy = req.user._id;
-      raisedByModel = "User";
-    } else if (req.driver) {
-      raisedBy = req.driver._id;
-      raisedByModel = "Driver";
-    } else {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
-
-    const dispute = await Dispute.create({
-      ride: rideId,
-      raisedBy,
-      raisedByModel,
-      reason,
-      description,
-    });
-
-    await redisClient.del("admin:all_disputes");
-
-    res.status(201).json({
-      success: true,
-      message:
-        "Dispute submitted successfully. Our team will review it shortly.",
-      data: dispute,
-    });
-  } catch (error) {
-    console.error(`❌ Create Dispute Error: ${error.message}`);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
 module.exports = {
   registerUser,
   loginUser,
@@ -265,5 +212,4 @@ module.exports = {
   updateUserProfile,
   addAddress,
   deleteAddress,
-  createDispute,
 };

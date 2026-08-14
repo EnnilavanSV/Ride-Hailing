@@ -1,26 +1,23 @@
+// utils/fareCalculator.js
+//
+// Single source of truth for pricing. Previously this file defined a flat
+// calculateFare() (base 5 + 2.5/km) that was never actually called, while
+// rideController.bookRide reimplemented pricing inline with a different,
+// vehicle-type-aware formula. That's now unified here — bookRide just calls
+// calculateFare() with the ride's vehicleType.
+
 // Convert degrees to radians for the math functions
 const toRadians = (degree) => {
   return degree * (Math.PI / 180);
 };
 
-// Calculate the final fare
-const calculateFare = (pickupLat, pickupLng, dropoffLat, dropoffLng) => {
-  const distanceInKm = calculateDistance(
-    pickupLat,
-    pickupLng,
-    dropoffLat,
-    dropoffLng,
-  );
-
-  // Define your pricing model
-  const BASE_FARE = 5.0; // Flat fee for getting in the car
-  const PER_KM_RATE = 2.5; // Cost per kilometer traveled
-
-  const totalFare = BASE_FARE + distanceInKm * PER_KM_RATE;
-
-  // Return rounded to 2 decimal places (e.g., 15.45)
-  return Math.round(totalFare * 100) / 100;
+// Per-vehicle-type pricing. Keys must match Ride.vehicleType exactly.
+const FARE_RATES = {
+  "Ride Standard": { baseFare: 50, perKmRate: 12 },
+  "Ride Premium": { baseFare: 50, perKmRate: 22 },
+  "Ride XL": { baseFare: 50, perKmRate: 30 },
 };
+const DEFAULT_VEHICLE_TYPE = "Ride Standard";
 
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Radius of the Earth in kilometers
@@ -38,4 +35,33 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return distance; // Returns distance in km
 };
 
-module.exports = { calculateFare, calculateDistance };
+// Calculate the final fare for a ride, based on distance and vehicle type
+const calculateFare = (
+  pickupLat,
+  pickupLng,
+  dropoffLat,
+  dropoffLng,
+  vehicleType = DEFAULT_VEHICLE_TYPE,
+) => {
+  const distanceInKm = calculateDistance(
+    pickupLat,
+    pickupLng,
+    dropoffLat,
+    dropoffLng,
+  );
+
+  const { baseFare, perKmRate } =
+    FARE_RATES[vehicleType] || FARE_RATES[DEFAULT_VEHICLE_TYPE];
+
+  const totalFare = baseFare + distanceInKm * perKmRate;
+
+  // Return rounded to 2 decimal places (e.g., 15.45)
+  return Math.round(totalFare * 100) / 100;
+};
+
+module.exports = {
+  calculateFare,
+  calculateDistance,
+  FARE_RATES,
+  DEFAULT_VEHICLE_TYPE,
+};

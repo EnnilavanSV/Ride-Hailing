@@ -77,6 +77,19 @@ const protectDriver = async (req, res, next) => {
         });
       }
 
+      //  SECURITY: Re-check the driver's account status on every request,
+      //  not just when accepting a ride. A driver who is suspended or
+      //  rejected keeps a valid JWT for up to 30 days, so without this
+      //  check they could keep using every other protected endpoint
+      //  (updating location, toggling duty status, etc.) after being
+      //  suspended.
+      if (req.driver.status === "suspended" || req.driver.status === "rejected") {
+        return res.status(403).json({
+          success: false,
+          message: `Your account has been ${req.driver.status}. Contact support for assistance.`,
+        });
+      }
+
       next();
     } catch (error) {
       console.error(error);

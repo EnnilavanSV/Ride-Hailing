@@ -1,10 +1,13 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const dotenv = require("dotenv");
 const http = require("http");
 const morgan = require("morgan");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
+const { allowedOrigins } = require("./config/cors");
+const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
 dotenv.config();
 const app = express();
@@ -15,17 +18,11 @@ const {
   pollingLimiter,
 } = require("./middleware/rateLimiter");
 
+app.use(helmet());
 app.use(morgan("dev"));
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "https://ride-hailing-rider-app-liard.vercel.app",
-      "https://ride-hailing-driver-app-rho.vercel.app",
-      "https://ride-hailing-admin-app.vercel.app",
-    ],
+    origin: allowedOrigins,
     credentials: true,
   }),
 );
@@ -60,20 +57,18 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// 404 handler for anything that didn't match a route above,
+// then the centralized error handler for everything else.
+app.use(notFound);
+app.use(errorHandler);
+
 //Create an HTTP server using the Express app
 const server = http.createServer(app);
 
 //Initialize Socket.io attached to the HTTP server
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "https://ride-hailing-driver-app-rho.vercel.app",
-      "https://ride-hailing-rider-app-liard.vercel.app",
-      "https://ride-hailing-admin-app.vercel.app",
-    ],
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT"],
     credentials: true,
   },

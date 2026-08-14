@@ -1,10 +1,10 @@
 const mongoose = require("mongoose");
 const Ride = require("../models/Ride");
 const Driver = require("../models/Driver");
-const Dispute = require("../models/Dispute");
 const jwt = require("jsonwebtoken");
 
 const redisClient = require("../config/redis");
+const { setDriverDutyStatus } = require("../utils/rideCacheHelpers");
 
 // Helper function to generate the token
 const generateToken = (id) => {
@@ -138,22 +138,17 @@ const updateDutyStatus = async (req, res) => {
     }
 
     //  Toggle the string value instead of a boolean
-    if (driver.dutyStatus === "online") {
-      driver.dutyStatus = "offline";
-    } else {
-      driver.dutyStatus = "online";
-    }
+    const newStatus = driver.dutyStatus === "online" ? "offline" : "online";
 
-    await driver.save();
-
-    // Clear admin drivers list so availability updates instantly on the God-Mode map
-    await redisClient.del("admin:all_drivers");
-    await redisClient.del(`driver_active_ride:${driverId}`);
+    //  setDriverDutyStatus both saves the new status and clears every
+    //  cache key that depends on it (admin driver list, live map, this
+    //  driver's "current ride" view) in one place.
+    await setDriverDutyStatus(driverId, newStatus);
 
     res.status(200).json({
       success: true,
-      message: `Driver is now ${driver.dutyStatus}`,
-      dutyStatus: driver.dutyStatus, // Send the new string back to React
+      message: `Driver is now ${newStatus}`,
+      dutyStatus: newStatus, // Send the new string back to React
     });
   } catch (error) {
     console.error(`❌ Toggle Availability Error: ${error.message}`);
@@ -264,10 +259,18 @@ const getDriverProfile = async (req, res) => {
   }
 };
 
+// @desc    Update the logged-in driver's own profile
+// @route   PUT /api/drivers/profile
+// @access  Private (driver)
 const updateDriverProfile = async (req, res) => {
   try {
+    //  BUGFIX: this used to reference an undefined `driverId` variable
+    //  (a ReferenceError on every call, so this endpoint always 500'd).
+    //  It should come from req.driver, same as everywhere else in this file.
+    const driverId = req.driver._id;
+
     const updatedDriver = await Driver.findByIdAndUpdate(
-      req.driver._id,
+      driverId,
       {
         name: req.body.name,
         email: req.body.email,
@@ -276,10 +279,18 @@ const updateDriverProfile = async (req, res) => {
       { new: true, runValidators: true },
     );
 
+    if (!updatedDriver) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Driver not found" });
+    }
+
     await redisClient.del(`driver_profile:${driverId}`);
+    await redisClient.del("admin:all_drivers");
 
     res.status(200).json({ success: true, data: updatedDriver });
   } catch (error) {
+    console.error(`❌ Driver Profile Update Error: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -288,69 +299,27 @@ const updateLocation = async (req, res) => {
   try {
     const { lat, lng } = req.body;
 
-    if (!lat || !lng) {
+    if (lat === undefined || lat === null || lng === undefined || lng === null) {
       return res
         .status(400)
         .json({ success: false, message: "Missing coordinates" });
     }
 
-    const driver = await require("../models/Driver").findByIdAndUpdate(
+    const driver = await Driver.findByIdAndUpdate(
       req.driver._id,
       { currentLocation: { lat, lng } },
-      { returnDocument: "after" },
+      { new: true },
     );
+
+    if (!driver) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Driver not found" });
+    }
 
     res.status(200).json({ success: true, data: driver.currentLocation });
   } catch (error) {
     console.error(`❌ Update Location Error: ${error.message}`);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
-const createDispute = async (req, res) => {
-  try {
-    const { rideId, reason, description } = req.body;
-
-    if (!rideId || !reason || !description) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Please provide a Ride ID, select a reason, and describe the issue.",
-      });
-    }
-
-    // Dynamically determine who is raising the dispute based on the auth middleware
-    let raisedBy;
-    let raisedByModel;
-
-    if (req.user) {
-      raisedBy = req.user._id;
-      raisedByModel = "User";
-    } else if (req.driver) {
-      raisedBy = req.driver._id;
-      raisedByModel = "Driver";
-    } else {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
-    }
-
-    const dispute = await Dispute.create({
-      ride: rideId,
-      raisedBy,
-      raisedByModel,
-      reason,
-      description,
-    });
-
-    await redisClient.del("admin:all_disputes");
-
-    res.status(201).json({
-      success: true,
-      message:
-        "Dispute submitted successfully. Our team will review it shortly.",
-      data: dispute,
-    });
-  } catch (error) {
-    console.error(`❌ Create Dispute Error: ${error.message}`);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
@@ -364,5 +333,4 @@ module.exports = {
   getDriverProfile,
   updateDriverProfile,
   updateLocation,
-  createDispute,
 };
